@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Word → Cleaned for CMS (v3.6)</title>
+  <style>
+    :root { --bg:#f8fafc; --panel:#ffffff; --text:#0f172a; --muted:#475569; --border:#e5e7eb; }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--text);margin:0}
+    header{padding:1rem;border-bottom:1px solid var(--border);position:sticky;top:0;background:#fff;display:flex;gap:12px;align-items:center}
+    h1{margin:0;font-size:18px}
+    #bootStatus{font-size:12px;color:#2563eb}
+    .app{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:12px}
+    .card h2{margin:0;padding:.75rem;font-size:14px;border-bottom:1px solid var(--border);color:var(--muted)}
+    .body{padding:.75rem}
+    #pasteBox{width:100%;height:52vh;background:#fff;color:var(--text);padding:12px;outline:none;overflow:auto;border-radius:8px;border:1px solid var(--border)}
+
+    .toolbar{display:flex;flex-wrap:wrap;gap:8px;padding:.75rem;border-top:1px solid var(--border);background:#fff;border-radius:0 0 12px 12px}
+    button{background:#fff;color:#0f172a;border:1px solid #cbd5e1;padding:8px 12px;border-radius:8px;cursor:pointer}
+    button:hover{background:#f1f5f9;border-color:#94a3b8}
+    .status{font-size:12px;color:#2563eb;margin-left:auto}
+
+    .controls{display:flex;gap:12px;align-items:center;margin-top:8px;font-size:13px;color:#334155;flex-wrap:wrap}
+    .controls label{display:inline-flex;gap:6px;align-items:center}
+    .controls input[type="range"]{width:160px}
+    .controls fieldset{border:1px dashed var(--border); padding:.5rem .75rem; border-radius:8px}
+
+    /* Preview */
+    #preview{width:100%;height:58vh;background:#fff;color:#111;padding:12px;border-radius:8px;overflow:auto;border:1px solid var(--border);
+      font-family: Calibri,"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+      --bullet-size-px: 10; --bullet-indent: 1rem; --bullet-top-adjust: 0px;
+    }
+    #preview.cms-bullets ul,#preview.cms-bullets ol{list-style:none;padding-left:var(--bullet-indent);margin:0}
+    #preview.cms-bullets li{position:relative;margin:.5em 0}
+    #preview.cms-bullets ul li::before{content:'';position:absolute;left:calc(-1 * var(--bullet-indent));
+      top:calc(.9em - (var(--bullet-size-px) * 1px)/1.6 + var(--bullet-top-adjust));
+      width:calc(var(--bullet-size-px) * 1px); height:calc(var(--bullet-size-px) * 1px); border-radius:50%; background:currentColor}
+    #preview.cms-bullets ol{counter-reset:item}
+    #preview.cms-bullets ol li{counter-increment:item}
+    #preview.cms-bullets ol li::before{content: counter(item) '.'; position:absolute; left:calc(-1 * var(--bullet-indent)); top:0; font-weight:700}
+
+    /* Markdown table block */
+    .md-table{font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#f8fafc; border:1px dashed var(--border); padding:.5rem .75rem; white-space:pre; margin:.5rem 0;}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Word → Cleaned for CMS</h1>
+    <div id="bootStatus" aria-live="polite"></div>
+  </header>
+
+  <main class="app">
+    <section class="card">
+      <h2>1) Paste from Word & options</h2>
+      <div class="body">
+        <div id="pasteBox" contenteditable="true" aria-label="Paste your Word content here"></div>
+        <div class="controls">
+          <fieldset>
+            <legend><strong>Bullet mode</strong></legend>
+            <label><input type="radio" name="bulletMode" id="modePreview" value="preview" checked> Use CMS bullets (preview-only)</label>
+            <label><input type="radio" name="bulletMode" id="modeBake" value="bake"> Bake size into output (for screenshots only)</label>
+          </fieldset>
+          <fieldset>
+            <legend><strong>Bullet size/indent</strong></legend>
+            <label>Size <input type="range" id="sizeRange" min="10" max="22" value="10"></label>
+            <label>Indent <input type="range" id="indentRange" min="16" max="40" value="16"></label>
+          </fieldset>
+        </div>
+      </div>
+      <div class="toolbar">
+        <button type="button" id="cleanKeep">Clean → Keep Lists</button>
+        <button type="button" id="cleanNoBullets">Clean → No Bullets (paragraphs)</button>
+        <button type="button" id="clearBtn">Clear</button>
+        <span id="statusL" class="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2) Cleaned for CMS (copy from here)</h2>
+      <div class="body">
+        <div id="preview" class="cms-bullets" aria-label="Cleaned content preview" contenteditable="false"></div>
+      </div>
+      <div class="toolbar">
+        <button type="button" id="copyRich">Copy Cleaned (Rich)</button>
+        <button type="button" id="copyPlain">Copy Plain Text</button>
+        <span id="statusR" class="status" aria-live="polite"></span>
+      </div>
+    </section>
+  </main>
+
+<script>
+window.addEventListener('DOMContentLoaded', function(){
+  const boot = (msg)=>{ const el=document.getElementById('bootStatus'); if(el){ el.textContent=msg; setTimeout(()=>{el.textContent='';},1800);} };
+  window.addEventListener('error', (e)=>{ boot('JS error: ' + (e.message||'unknown')); });
+
+  // ---- Element refs ----
+  const $ = id => document.getElementById(id);
+  const pasteBox   = $('pasteBox');
+  const preview    = $('preview');
+  const cleanKeep  = $('cleanKeep');
+  const cleanNoBullets = $('cleanNoBullets');
+  const clearBtn   = $('clearBtn');
+  const copyRich   = $('copyRich');
+  const copyPlain  = $('copyPlain');
+  const statusL    = $('statusL');
+  const statusR    = $('statusR');
+  const modePreview= $('modePreview');
+  const modeBake   = $('modeBake');
+  const sizeRange  = $('sizeRange');
+  const indentRange= $('indentRange');
+
+  const on=(el,ev,fn)=>{ if(el && el.addEventListener) el.addEventListener(ev, fn); };
+  const setStatus=(el,msg)=>{ if(!el) return; el.textContent=msg; if(msg) setTimeout(()=>{ if(el.textContent===msg) el.textContent=''; },1200); };
+
+  const ALLOWED = new Set(['A','ABBR','B','BLOCKQUOTE','BR','CAPTION','CODE','DEL','DIV','EM','HR','I','IMG','INS','KBD','LI','MARK','OL','P','PRE','Q','S','SAMP','SMALL','SPAN','STRONG','SUB','SUP','TABLE','TBODY','TD','TFOOT','TH','THEAD','TR','U','UL','H1','H2','H3','H4','H5','H6']);
+  const isInlineWrapper = (t)=>/^(SPAN|STRONG|EM|I|U|B|SMALL)$/i.test(t||'');
+  const normalizeTag = (t)=> t==='B'?'STRONG': t==='I'?'EM': t;
+
+  // --- Convert Word bullet/number paragraphs to UL/OL (recursive)
+  function convertDeep(container){
+    const BULLET_RE = /^(?:[\u2022\u00B7\u25CF]|[-–—])\s+/; // • · ● - – —
+    const NUMBER_RE = /^(?:\(?\d+[\.)]|\(?[A-Za-z][\.)]|(?:[IVXLCDM]+|[ivxlcdm]+)[\.)])\s*/;
+
+    function strip(html){
+      const tmp = container.ownerDocument.createElement('div'); tmp.innerHTML = html;
+      tmp.querySelectorAll('span').forEach(s=>{ const st=s.getAttribute('style')||''; if(/mso-list/i.test(st)) s.remove(); });
+      const MARKER_ONLY   = /^\s*(?:[\u2022\u00B7\u25CF]|[-–—]|\(?\d+[\.)]|\(?[A-Za-z][\.)]|(?:[IVXLCDM]+|[ivxlcdm]+)[\.)])\s*$/;
+      const MARKER_PREFIX = /^\s*(?:[\u2022\u00B7\u25CF]|[-–—]|\(?\d+[\.)]|\(?[A-Za-z][\.)]|(?:[IVXLCDM]+|[ivxlcdm]+)[\.)])\s*/;
+      let buf=''; const nodes=[]; let n=tmp.firstChild; let steps=0;
+      while(n && steps<5){
+        if(n.nodeType===3){ buf += n.nodeValue.replace(/\u00A0/g,' '); nodes.push(n); }
+        else if(n.nodeType===1 && isInlineWrapper(n.tagName)){ buf += (n.textContent||'').replace(/\u00A0/g,' '); nodes.push(n); }
+        else if(n.nodeType===1 && n.tagName==='BR'){ nodes.push(n); }
+        else break;
+        steps++; n = nodes[nodes.length-1].nextSibling;
+      }
+      if(MARKER_ONLY.test(buf.trim())){ nodes.forEach(x=>x.remove()); }
+      else {
+        const f=tmp.firstChild;
+        if(f && f.nodeType===3){ f.nodeValue = f.nodeValue.replace(MARKER_PREFIX,''); }
+        else if(f && f.nodeType===1 && isInlineWrapper(f.tagName)){
+          const t=(f.textContent||''); const t2=t.replace(MARKER_PREFIX,''); if(t2!==t) f.textContent=t2;
+        }
+      }
+      return tmp.innerHTML;
+    }
+
+    const nodes = Array.from(container.childNodes);
+    const out = []; let current = null; const close = ()=>{ if(current){ out.push(current.el); current=null; } };
+    for(const n of nodes){
+      if(n.nodeType===1){
+        if(n.tagName==='P'){
+          const text=(n.textContent||'').replace(/\u00A0/g,' ').trim();
+          const isBullet = BULLET_RE.test(text);
+          const isNumber = NUMBER_RE.test(text);
+          if(isBullet || isNumber){
+            const type = isBullet ? 'ul' : 'ol';
+            if(!current || current.type!==type){ close(); current={type, el: container.ownerDocument.createElement(type)}; }
+            const li = container.ownerDocument.createElement('li');
+            li.innerHTML = strip(n.innerHTML);
+            current.el.appendChild(li);
+            continue;
+          }
+        }
+        convertDeep(n); close(); out.push(n); continue;
+      }
+      close(); out.push(n);
+    }
+    close(); container.innerHTML = ''; out.forEach(ch=>container.appendChild(ch));
+  }
+
+  // --- Table → Markdown ---
+  function escapeMdCell(s){ return (s||'').replace(/\|/g,'\\|').replace(/\r?\n+/g,' ').trim(); }
+  function tableToMarkdown(tbl){
+    const rows = Array.from(tbl.querySelectorAll('tr'));
+    const grid = rows.map(tr=> Array.from(tr.children).map(td=> escapeMdCell(td.textContent||'')));
+    let header = grid[0] || [];
+    const cols = Math.max(1, header.length, ...grid.map(r=>r.length));
+    const pad = r=>{ const a=r.slice(); while(a.length<cols) a.push(''); return a; };
+    const lines=[]; const h=pad(header);
+    lines.push('| ' + h.join(' | ') + ' |');
+    lines.push('| ' + Array(cols).fill('---').join(' | ') + ' |');
+    for(let i=1;i<grid.length;i++){ const r=pad(grid[i]); lines.push('| ' + r.join(' | ') + ' |'); }
+    return lines.join('\n');
+  }
+  function convertTablesToMarkdown(root){
+    root.querySelectorAll('table').forEach(tbl=>{
+      const pre = document.createElement('pre');
+      pre.className = 'md-table';
+      pre.textContent = tableToMarkdown(tbl);
+      tbl.replaceWith(pre);
+    });
+  }
+
+  // --- Misc cleanups ---
+  function stripMarkersInLis(root){
+    const MARKER = /(^(?:\s*(?:[\u2022\u00B7\u25CF]|[-–—]|\(?\d+[\.)]|\(?[A-Za-z][\.)]|(?:[IVXLCDM]+|[ivxlcdm]+)[\.)])\s*))/;
+    const isInlineEl = el => el && el.nodeType===1 && /^(SPAN|STRONG|EM|I|U|B|SMALL)$/i.test(el.tagName);
+    function removeFirstCharsAcross(el, count){ const tw = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null); let t = tw.nextNode(); while(t && count>0){ const s=t.nodeValue||''; const take=Math.min(count, s.length); t.nodeValue=s.slice(take); count-=take; t=tw.nextNode(); } }
+    function cleanupLeading(li){ while(li.firstChild){ const n=li.firstChild; if(n.nodeType===3){ if(/^\s*$/.test((n.nodeValue||'').replace(/\u00A0/g,' '))){ li.removeChild(n); continue; } break; } if(n.nodeType===1){ if(n.tagName==='BR'){ li.removeChild(n); continue; } if(isInlineEl(n) && ((n.textContent||'').replace(/\u00A0/g,' ').trim()==='')){ li.removeChild(n); continue; } } break; } }
+    root.querySelectorAll('li').forEach(li=>{ let txt=''; let node=li.firstChild; let steps=0; while(node && steps<6 && txt.length<24){ if(node.nodeType===3){ txt += (node.nodeValue||'').replace(/\u00A0/g,' '); } else if(node.nodeType===1){ if(node.tagName==='BR'){ txt+='\n'; } else if(isInlineEl(node)){ txt += (node.textContent||'').replace(/\u00A0/g,' '); } else { break; } } else { break; } steps++; node=node.nextSibling; } const m = txt.match(MARKER); if(m && m[1]){ removeFirstCharsAcross(li, m[1].length); } cleanupLeading(li); });
+  }
+  function stripMarkersInParagraphs(root){ const MARKER_PREFIX = /^\s*(?:[\u2022\u00B7\u25CF]|[-–—]|\(?\d+[\.)]|\(?[A-Za-z][\.)]|(?:[IVXLCDM]+|[ivxlcdm]+)[\.)])\s*/; const MARKER_ONLY   = /^\s*(?:[\u2022\u00B7\u25CF]|[-–—]|\(?\d+[\.)]|\(?[A-Za-z][\.)]|(?:[IVXLCDM]+|[ivxlcdm]+)[\.)])\s*$/; root.querySelectorAll('p').forEach(p=>{ let n=p.firstChild; while(n && n.nodeType===1 && /^(SPAN|STRONG|EM|I|U|B|SMALL)$/i.test(n.tagName)){ if(!n.firstChild) break; n=n.firstChild; } if(n && n.nodeType===3){ const s=n.nodeValue.replace(/\u00A0/g,' '); const t=s.replace(MARKER_PREFIX,''); if(t!==s) n.nodeValue=t; } const fc=p.firstElementChild; if(fc && /^(SPAN|STRONG|EM|I|U|B|SMALL)$/i.test(fc.tagName) && MARKER_ONLY.test(fc.textContent.replace(/\u00A0/g,' '))){ fc.remove(); } }); }
+  function normalizeTextSpaces(root){ const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null); let t; while((t = tw.nextNode())){ t.nodeValue = (t.nodeValue||'').replace(/\u00A0/g,' '); } }
+  function trimInlineFormatting(root){ root.querySelectorAll('strong,b,em,i,u,span').forEach(el=>{ if(el.firstChild && el.firstChild.nodeType===3){ el.firstChild.nodeValue = el.firstChild.nodeValue.replace(/^\s+/, ''); } if(el.lastChild  && el.lastChild.nodeType===3){ el.lastChild.nodeValue  = el.lastChild.nodeValue.replace(/\s+$/, ''); } if((el.textContent||'').trim()===''){ while(el.firstChild){ el.parentNode.insertBefore(el.firstChild, el); } el.remove(); } }); }
+  function ensureSpacesBetweenInlineSiblings(root){ function firstChars(n,k){const t=(n.textContent||'');return t?t.slice(0,k):'';} function lastChars(n,k){const t=(n.textContent||'');return t?t.slice(-k):'';} function isOrdinalStart(node){ return /^(st|nd|rd|th)/i.test(firstChars(node,2)); } function endsWithDigitText(txt){ return /[0-9]$/.test(txt||''); } root.querySelectorAll('strong,b,em,span,i,u,small').forEach(el=>{ const kids=Array.from(el.childNodes); for(let i=0;i<kids.length-1;i++){ const a=kids[i], b=kids[i+1]; const aEnd = (a.nodeType===3? lastChars(a,1): lastChars(a,1)); const bStart= (b.nodeType===3? firstChars(b,1): firstChars(b,2)); const nextIsOrdinal = (b.nodeType===1 && b.tagName==='SUP') || (isOrdinalStart(b) && endsWithDigitText((a.textContent||''))); if(nextIsOrdinal) continue; if(aEnd && bStart && aEnd.trim()!=='' && bStart.trim()!==''){ el.insertBefore(document.createTextNode(' '), b); } } }); }
+  function fixOrdinalSpacing(root){ const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null); let t; while((t=tw.nextNode())){ t.nodeValue = (t.nodeValue||'').replace(/(\d)\s+(st|nd|rd|th)\b/gi, '$1$2'); } root.querySelectorAll('sup, span, strong, b, em, i').forEach(el=>{ const txt=(el.textContent||'').trim().toLowerCase(); if(!/^(st|nd|rd|th)$/.test(txt)) return; const prev=el.previousSibling; if(prev && prev.nodeType===3 && /\d\s+$/.test(prev.nodeValue||'')){ prev.nodeValue = prev.nodeValue.replace(/\s+$/, ''); if(el.firstChild && el.firstChild.nodeType===3){ el.firstChild.nodeValue = el.firstChild.nodeValue.replace(/^\s+/, ''); } } }); }
+  function fixSpaceBeforePunctuation(root){ const tw = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null); let t; while((t=tw.nextNode())){ if(/^\s+[,.;:]/.test(t.nodeValue||'')){ const prev=t.previousSibling; if(prev && (prev.nodeType===3 ? /\w$/.test(prev.nodeValue||'') : prev.nodeType===1)){ t.nodeValue = (t.nodeValue||'').replace(/^\s+([,.;:])/, '$1'); } } } }
+  function finalDedupe(root){ const RE = /^(?:\s*(?:[\u2022\u00B7\u25CF]|[-–—]|\(?\d+[\.)]|\(?[A-Za-z][\.)]|(?:[IVXLCDM]+|[ivxlcdm]+)[\.)]))\s*/; const isInline = el => el && el.nodeType===1 && /^(SPAN|STRONG|EM|I|U|B|SMALL)$/i.test(el.tagName); function removeChars(el,count){ const tw=document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null); let t=tw.nextNode(); while(t && count>0){ const s=t.nodeValue||''; const take=Math.min(count,s.length); t.nodeValue=s.slice(take); count-=take; t=tw.nextNode(); } } function cleanup(li){ while(li.firstChild){ const n=li.firstChild; if(n.nodeType===3){ if(/^[\s\u00A0]*$/.test(n.nodeValue||'')){ li.removeChild(n); continue; } break; } if(n.nodeType===1){ if(n.tagName==='BR'){ li.removeChild(n); continue; } if(isInline(n) && ((n.textContent||'').replace(/\u00A0/g,' ').trim()==='')){ li.removeChild(n); continue; } } break; } } root.querySelectorAll('li').forEach(li=>{ let txt=''; let nd=li.firstChild; let i=0; while(nd && i<6 && txt.length<24){ if(nd.nodeType===3) txt += (nd.nodeValue||'').replace(/\u00A0/g,' '); else if(nd.nodeType===1){ if(nd.tagName==='BR') txt+='\n'; else if(isInline(nd)) txt += (nd.textContent||'').replace(/\u00A0/g,' '); else break; } else break; i++; nd=nd.nextSibling; } const m = txt.match(RE); if(m){ removeChars(li, m[0].length); cleanup(li); } }); }
+  function mergeAdjacentLists(root){ function isWs(n){ return n && n.nodeType===3 && /^\s*$/.test((n.nodeValue||'')); } function mergeIn(parent){ for(let i=0;i<parent.childNodes.length;i++){ const node = parent.childNodes[i]; if(node && node.nodeType===1) mergeIn(node); if(node && node.nodeType===1 && (node.tagName==='OL' || node.tagName==='UL')){ let j=i+1; while(j<parent.childNodes.length){ const mid = parent.childNodes[j]; if(isWs(mid)){ parent.removeChild(mid); continue; } if(mid && mid.nodeType===1 && mid.tagName===node.tagName){ while(mid.firstChild) node.appendChild(mid.firstChild); parent.removeChild(mid); continue; } break; } } } } mergeIn(root); }
+
+  function cleanNode(node){ if(node.nodeType===3) return document.createTextNode(node.nodeValue); if(node.nodeType!==1) return null; const tag=normalizeTag(node.tagName); if(!ALLOWED.has(tag)){ const frag=document.createDocumentFragment(); node.childNodes.forEach(ch=>{ const c=cleanNode(ch); if(c) frag.appendChild(c); }); return frag; } const el=document.createElement(tag); node.childNodes.forEach(ch=>{ const c=cleanNode(ch); if(c) el.appendChild(c); }); return el; }
+
+  function generateCleanDom(paragraphMode){
+    const doc=new DOMParser().parseFromString('<div>'+(pasteBox ? pasteBox.innerHTML : '')+'</div>','text/html');
+    convertDeep(doc.body);
+    const container=document.createElement('div');
+    doc.body.childNodes.forEach(n=>{ const c=cleanNode(n); if(c) container.appendChild(c); });
+    // Normalize & tidy
+    normalizeTextSpaces(container); trimInlineFormatting(container); fixOrdinalSpacing(container); fixSpaceBeforePunctuation(container); ensureSpacesBetweenInlineSiblings(container);
+    // Lists and tables
+    stripMarkersInLis(container); mergeAdjacentLists(container); convertTablesToMarkdown(container);
+    if(paragraphMode){ container.querySelectorAll('ul,ol').forEach(list=>{ const frag=document.createDocumentFragment(); Array.from(list.children).forEach(li=>{ const p=document.createElement('p'); p.innerHTML=li.innerHTML; frag.appendChild(p); }); list.replaceWith(frag); }); stripMarkersInParagraphs(container); }
+    finalDedupe(container);
+    return container;
+  }
+
+  function bakeInlineBullets(root, px, indentPx){ root.querySelectorAll('ul,ol').forEach(list=>{ const isOL = list.tagName==='OL'; list.style.listStyle='none'; list.style.paddingLeft = indentPx+'px'; list.style.margin='0'; let idx=1; Array.from(list.children).forEach(li=>{ if(li.tagName!=='LI') return; li.style.position='relative'; li.style.margin='.5em 0'; li.style.paddingLeft = indentPx+'px'; const m=document.createElement('span'); if(isOL){ m.textContent=(idx++) + '.'; m.style.position='absolute'; m.style.left='0'; m.style.top='0'; m.style.fontWeight='700'; } else { m.style.position='absolute'; m.style.left='0'; m.style.top='0.95em'; m.style.transform='translateY(-50%)'; m.style.width= (parseInt(getComputedStyle(root).getPropertyValue('--bullet-size-px'))||10) +'px'; m.style.height=m.style.width; m.style.borderRadius='50%'; m.style.background='currentColor'; } li.insertBefore(m, li.firstChild); }); }); }
+
+  function getControls(){ const bulletMode = (modeBake && modeBake.checked) ? 'bake' : 'preview'; const px = parseInt(sizeRange.value,10) || 10; const indentPx = parseInt(indentRange.value,10) || 16; return {bulletMode, px, indentPx}; }
+
+  function render(paragraphMode){ try{ const cleanDom = generateCleanDom(!!paragraphMode); const {bulletMode, px, indentPx} = getControls(); const cleanedHTML = cleanDom.innerHTML; if(paragraphMode){ preview.classList.remove('cms-bullets'); preview.innerHTML = cleanedHTML; setStatus(statusL,'Converted (paragraphs)'); return; } if(bulletMode==='bake'){ const temp=document.createElement('div'); temp.innerHTML=cleanedHTML; bakeInlineBullets(temp, px, indentPx); preview.classList.remove('cms-bullets'); preview.innerHTML=temp.innerHTML; } else { preview.classList.add('cms-bullets'); preview.style.setProperty('--bullet-size-px', px); preview.style.setProperty('--bullet-indent', (indentPx/16)+'rem'); preview.innerHTML=cleanedHTML; } setStatus(statusL,'Converted (lists)'); }catch(e){ console.error(e); setStatus(statusL,'Error converting'); boot('JS error: ' + e.message); } }
+
+  // Expose for emergency rebinding
+  window.render = render;
+
+  function copyFromNode(node){ if(!node) return; const sel=window.getSelection(); const range=document.createRange(); range.selectNodeContents(node); sel.removeAllRanges(); sel.addRange(range); let ok=false; try{ ok=document.execCommand('copy'); }catch(e){ ok=false; } sel.removeAllRanges(); setStatus(statusR, ok?'Copied':'Press Ctrl/⌘+C'); }
+
+  // Bind buttons (null-safe)
+  on(cleanKeep,'click', ()=> render(false));
+  on(cleanNoBullets,'click', ()=> render(true));
+  on(clearBtn,'click', ()=>{ if(pasteBox) pasteBox.innerHTML=''; if(preview) preview.innerHTML=''; setStatus(statusL,'Cleared'); });
+  on(copyRich,'click', ()=> copyFromNode(preview));
+  on(copyPlain,'click', ()=>{ const ta=document.createElement('textarea'); ta.style.position='fixed'; ta.style.left='-9999px'; ta.value = preview.innerText || ''; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); setStatus(statusR,'Copied'); });
+  on(modePreview,'change', ()=> render(false)); on(modeBake,'change', ()=> render(false)); on(sizeRange,'input', ()=> render(false)); on(indentRange,'input', ()=> render(false));
+
+  boot('Ready');
+});
+</script>
+</body>
+</html>
