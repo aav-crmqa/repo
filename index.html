@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Word → Basic Markdown Converter</title>
+  <style>
+    :root { --bg:#0b0f14; --panel:#111823; --ink:#e7ecf3; --muted:#a9b4c1; --accent:#7cc5ff; }
+    html,body { height:100%; }
+    body { margin:0; font:16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Inter, Arial, sans-serif; color:var(--ink); background:linear-gradient(180deg,#0b0f14,#0d1520); }
+    .wrap { max-width:1100px; margin:32px auto; padding:0 16px; }
+    h1 { font-size:28px; margin:0 0 6px; }
+    .sub { color:var(--muted); margin-bottom:20px; }
+    .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+    .panel { background:var(--panel); border:1px solid #1e2a3b; border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.35); }
+    .head { display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:1px solid #1b2434; }
+    .head h2 { margin:0; font-size:14px; letter-spacing:.6px; text-transform:uppercase; color:#c7d2e1; }
+    .area { padding:12px; }
+
+    /* Input pane visuals: prevent whole-pane bold + make scrollable */
+    #pasteArea { outline:none; }
+    [contenteditable="true"] { cursor:text; }
+    .editable { padding:12px; background:#0e1624; border:1px solid #1e2a3b; border-radius:12px; min-height:260px; max-height:420px; overflow:auto; font-weight:400; }
+    .editable strong, .editable b { font-weight:700; }
+    .editable em, .editable i { font-style:italic; }
+
+    /* Output pane scrollable */
+    textarea { width:100%; min-height:320px; max-height:420px; overflow:auto; resize:vertical; padding:12px; border-radius:12px; border:1px solid #1e2a3b; background:#0e1624; color:var(--ink); font:14px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
+
+    .toolbar { display:flex; flex-wrap:wrap; gap:8px; padding:12px; border-top:1px solid #1b2434; }
+    .toolbar .group{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+    .sep{width:1px;height:28px;background:#1b2434;margin:0 6px}
+
+    button { appearance:none; border:1px solid #28415f; background:#0f1c2e; color:var(--ink); padding:10px 12px; border-radius:12px; cursor:pointer; font-weight:600; }
+    button:hover { border-color:#335278; background:#12243a; }
+    .ghost { opacity:.8; }
+    .kbd { font:12px/1.2 ui-monospace, Menlo, Consolas, monospace; color:#b7c4d6; background:#0f1a29; padding:2px 6px; border:1px solid #20324b; border-radius:6px; }
+    .note { color:#b6c3d3; font-size:13px; }
+    .footer { margin-top:14px; color:#93a4b8; font-size:13px; }
+    @media (max-width: 900px) { .grid { grid-template-columns:1fr; } }
+
+    /* Modal */
+    .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:center;justify-content:center;padding:16px;z-index:50}
+    .modal.show{display:flex}
+    .modal .box{background:var(--panel);border:1px solid #1e2a3b;border-radius:16px;padding:16px;min-width:320px;max-width:90vw}
+    .modal label{display:block;font-size:13px;color:#c7d2e1;margin:8px 0 4px}
+    .modal input{width:100%;padding:10px;border-radius:8px;border:1px solid #1e2a3b;background:#0e1624;color:var(--ink)}
+    .modal .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:12px}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Word → Basic Markdown Converter</h1>
+    <p class="sub">Paste formatted text from Word/Google Docs on the left, then convert to <em>Basic Markdown</em> on the right. Handles headings, bold/italic, lists, links, images, blockquotes, code, and horizontal rules.</p>
+
+    <div class="grid">
+      <section class="panel" aria-label="input">
+        <div class="head"><h2>Paste Here</h2><span class="note">Tip: paste rich HTML directly for best results.</span></div>
+        <div class="area">
+          <div id="pasteArea" class="editable" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Paste source area"></div>
+        </div>
+        <div class="toolbar">
+          <div class="group" aria-label="formatting controls">
+            <button id="boldBtn" title="Bold (Ctrl/Cmd+B)"><b>B</b></button>
+            <button id="italicBtn" title="Italic (Ctrl/Cmd+I)"><i>I</i></button>
+            <span class="sep" aria-hidden="true"></span>
+            <button id="h1Btn" title="Heading 1">H1</button>
+            <button id="h2Btn" title="Heading 2">H2</button>
+            <button id="h3Btn" title="Heading 3">H3</button>
+            <button id="ulBtn" title="Bulleted list">• List</button>
+            <button id="olBtn" title="Numbered list">1. List</button>
+            <button id="quoteBtn" title="Blockquote">“” Quote</button>
+            <span class="sep" aria-hidden="true"></span>
+            <button id="clearFormatBtn" class="ghost" title="Remove inline formatting">Clear formatting</button>
+          </div>
+          <div class="group" aria-label="cleanup tools">
+            <button id="findBtn" title="Find & Replace">Find/Replace</button>
+            <button id="normalizeBtn" class="ghost" title="Straighten quotes, dashes, ellipses, NBSP">Normalize punctuation</button>
+            <button id="collapseBtn" class="ghost" title="Collapse extra spaces and blank lines">Collapse whitespace</button>
+            <button id="unwrapBtn" class="ghost" title="Turn soft line breaks into spaces">Unwrap lines</button>
+            <button id="fixBulletsBtn" title="Convert middle-dot bullets (·) into a real list">Make bullets (· → •)</button>
+            <span class="sep" aria-hidden="true"></span>
+            <button id="pasteBtn" title="Paste (Ctrl/Cmd+V)">Paste</button>
+            <button id="clearBtn" class="ghost" title="Clear input">Clear</button>
+            <span class="note">or drop HTML/text here</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="output">
+        <div class="head"><h2>Markdown (Basic)</h2><span class="note">Plain text output</span></div>
+        <div class="area">
+          <textarea id="mdOut" placeholder="# Your Markdown will appear here…" aria-label="Markdown output"></textarea>
+        </div>
+        <div class="toolbar">
+          <button id="convertBtn" title="Convert (Ctrl/Cmd+Enter)">Convert</button>
+          <button id="copyBtn" class="ghost" title="Copy to clipboard">Copy</button>
+          <button id="downloadBtn" class="ghost" title="Download .md file">Download .md</button>
+        </div>
+      </section>
+    </div>
+
+    <p class="footer">Shortcuts: <span class="kbd">Ctrl/Cmd+Enter</span> convert · <span class="kbd">Ctrl/Cmd+C</span> copy selection · Inline styles from Google Docs are normalized to semantic tags to avoid whole-pane bold.</p>
+  </div>
+
+  <!-- Find/Replace Modal -->
+  <div id="findModal" class="modal" role="dialog" aria-modal="true" aria-labelledby="findTitle">
+    <div class="box">
+      <h3 id="findTitle" style="margin:0 0 8px;font-size:16px">Find & Replace</h3>
+      <label for="findText">Find</label>
+      <input id="findText" placeholder="Exact text…" />
+      <label for="replaceText">Replace with</label>
+      <input id="replaceText" placeholder="Replacement…" />
+      <div class="actions">
+        <button id="replaceAllBtn">Replace all</button>
+        <button id="findCloseBtn" class="ghost">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // --- Utilities ----------------------------------------------------------
+    const el = (sel) => document.querySelector(sel);
+    const pasteArea = el('#pasteArea');
+    const mdOut = el('#mdOut');
+
+    function normalizeText(s){
+      if(!s) return '';
+      return s
+        .replace(/[\u2018\u2019\u201B]/g, "'")
+        .replace(/[\u201C\u201D\u201F]/g, '"')
+        .replace(/[\u2013]/g, '-')
+        .replace(/[\u2014]/g, '--')
+        .replace(/[\u2026]/g, '...')
+        .replace(/\u00A0/g, ' ');
+    }
+
+    // --- HTML → Markdown ----------------------------------------------------
+    function htmlToMarkdown(root){
+      const blocks = new Set(['P','DIV','SECTION','ARTICLE','HEADER','FOOTER','ASIDE','MAIN','FIGURE']);
+      function repeat(ch,n){ return new Array(n+1).join(ch); }
+      function textFrom(node){ return normalizeText(node.textContent || ''); }
+
+      function process(node, ctx={indent:0, inPre:false, inCode:false}){
+        if(node.nodeType === Node.TEXT_NODE){
+          const t = normalizeText(node.nodeValue);
+          return ctx.inPre || ctx.inCode ? t : t.replace(/\s+/g, ' ');
+        }
+        if(node.nodeType !== Node.ELEMENT_NODE) return '';
+        const tag = node.tagName;
+        const getKids = (nextCtx=ctx) => Array.from(node.childNodes).map(n => process(n,nextCtx)).join('');
+        const strong = (s) => s ? `**${s.trim()}**` : '';
+        const em = (s) => s ? `*${s.trim()}*` : '';
+
+        switch(tag){
+          case 'H1': case 'H2': case 'H3': case 'H4': case 'H5': case 'H6':{
+            const level = parseInt(tag[1],10);
+            const content = getKids();
+            return `\n${repeat('#',level)} ${content.trim()}\n\n`;
+          }
+          case 'BR': return '\n';
+          case 'HR': return '\n\n---\n\n';
+          case 'STRONG': case 'B': return strong(getKids());
+          case 'EM': case 'I': return em(getKids());
+          case 'DEL': case 'S': return getKids();
+          case 'A':{
+            const href = (node.getAttribute('href')||'').trim();
+            const text = getKids().trim() || href;
+            if(!href) return text; return `[${text}](${href})`;
+          }
+          case 'IMG':{
+            const alt = node.getAttribute('alt')||''; const src = node.getAttribute('src')||'';
+            if(!src) return ''; return `![${alt}](${src})`;
+          }
+          case 'CODE':{
+            if(ctx.inPre) return textFrom(node);
+            const code = textFrom(node).trim();
+            const escaped = code.replace(/`/g,'\u200B`');
+            return '`' + escaped + '`';
+          }
+          case 'PRE':{
+            const codeText = Array.from(node.childNodes).map(n => n.nodeType===1 && n.tagName==='CODE' ? textFrom(n) : textFrom(n)).join('');
+            const t = codeText.replace(/\n$/, '');
+            return `\n\n\`\`\`\n${t}\n\`\`\`\n\n`;
+          }
+          case 'BLOCKQUOTE':{
+            const inner = getKids();
+            return '\n' + inner.split(/\n/).map(l => l ? '> ' + l : '>').join('\n') + '\n\n';
+          }
+          case 'UL':{
+            const items = Array.from(node.children).filter(li=>li.tagName==='LI');
+            const out = items.map(li => listItemToMD(li, ctx.indent, '- ')).join('');
+            return `\n${out}\n`;
+          }
+          case 'OL':{
+            const start = parseInt(node.getAttribute('start')||'1',10);
+            const items = Array.from(node.children).filter(li=>li.tagName==='LI');
+            const out = items.map((li,i)=> listItemToMD(li, ctx.indent, `${start+i}. `)).join('');
+            return `\n${out}\n`;
+          }
+          case 'TABLE':{
+            const rows = Array.from(node.querySelectorAll('tr')).map(tr=>Array.from(tr.children).map(td=>normalizeText(td.textContent.trim())));
+            if(!rows.length) return '';
+            let md = '\n';
+            rows.forEach((cells,idx)=>{ md += '| ' + cells.join(' | ') + ' |\n'; if(idx===0) md += '|' + cells.map(()=> ' --- ').join('|') + '|\n'; });
+            md += '\n'; return md;
+          }
+          default:{
+            const content = getKids();
+            if(blocks.has(tag)) return `\n${content.trim()}\n\n`;
+            return content;
+          }
+        }
+
+        function listItemToMD(li, baseIndent, bullet){
+          const subLists = Array.from(li.children).filter(ch => ch.tagName==='UL' || ch.tagName==='OL');
+          const firstBlock = Array.from(li.childNodes).filter(n => !(n.nodeType===1 && (n.tagName==='UL' || n.tagName==='OL')));
+          const inner = firstBlock.map(n=>process(n,{...ctx, indent: baseIndent})).join('').trim();
+          let line = ' '.repeat(baseIndent) + bullet + inner + '\n';
+          if(subLists.length){ subLists.forEach(sl=>{ const nested = process(sl, { ...ctx, indent: baseIndent + 2 }); line += nested; }); }
+          return line;
+        }
+      }
+      const md = process(root); return cleanupMarkdown(md);
+    }
+
+    function cleanupMarkdown(md){
+      return md.replace(/\n{3,}/g, '\n\n').replace(/[ \t]+\n/g, '\n').replace(/^\s+|\s+$/g, '') + '\n';
+    }
+
+    function convertNow(){
+      const html = pasteArea.innerHTML.trim();
+      let md = '';
+      if(html){ const div = document.createElement('div'); div.innerHTML = html; md = htmlToMarkdown(div); }
+      else { md = cleanupMarkdown(normalizeText(pasteArea.textContent||'')); }
+      mdOut.value = md; mdOut.focus(); mdOut.select();
+    }
+
+    // --- Fake bullets → real lists (fixed) --------------------------------
+    function makeBulletsReal(){
+      const BULLET_RE = /^[\s]*([•·◦])\s*/; // bullet or middle-dot variants
+
+      // 1) Convert consecutive <p>/<div> bullets into a UL without losing content
+      const children = Array.from(pasteArea.childNodes);
+      let run = [];
+      function flushRun(){
+        if(run.length===0) return;
+        const ul = document.createElement('ul');
+        const first = run[0];
+        pasteArea.insertBefore(ul, first); // insert UL before we remove anything
+        run.forEach(p => {
+          const li = document.createElement('li');
+          li.innerHTML = (p.innerHTML||'').replace(BULLET_RE,'').trim();
+          ul.appendChild(li);
+          p.remove();
+        });
+        run = [];
+      }
+      children.forEach(node => {
+        if(node.nodeType===1 && (node.tagName==='P' || node.tagName==='DIV')){
+          const txt = (node.textContent||'').trim();
+          if(BULLET_RE.test(txt)){ run.push(node); return; }
+        }
+        flushRun();
+      });
+      flushRun();
+
+      // 2) Handle single blocks with <br>-separated fake bullets
+      pasteArea.querySelectorAll('p,div').forEach(block => {
+        const parts = block.innerHTML.split(/<br\s*\/?>(?:\s*)/i);
+        if(parts.length <= 1) return;
+        const bulletLines = parts.filter(l => BULLET_RE.test(l.replace(/<[^>]+>/g,'')));
+        if(bulletLines.length >= 2){
+          const ul = document.createElement('ul');
+          parts.forEach(line => {
+            const plain = line.replace(/<[^>]+>/g,'');
+            if(BULLET_RE.test(plain)){
+              const li = document.createElement('li');
+              li.innerHTML = line.replace(BULLET_RE,'').trim();
+              ul.appendChild(li);
+            } else if(plain.trim()) {
+              const p = document.createElement('p'); p.innerHTML = line; block.parentNode.insertBefore(p, block);
+            }
+          });
+          block.replaceWith(ul);
+        }
+      });
+    }
+
+    // --- Sanitize & paste/drag handling -----------------------------------
+    function sanitize(root){
+      const forbidden = ['SCRIPT','STYLE','NOSCRIPT'];
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null);
+      const toRemove = [];
+      while(walker.nextNode()){
+        const n = walker.currentNode;
+        if(forbidden.includes(n.tagName)) toRemove.push(n);
+        n.removeAttribute('style'); n.removeAttribute('class'); n.removeAttribute('id');
+      }
+      toRemove.forEach(n=>n.remove());
+    }
+
+    pasteArea.addEventListener('paste', (e)=>{
+      const html = e.clipboardData && e.clipboardData.getData('text/html');
+      const text = e.clipboardData && e.clipboardData.getData('text/plain');
+      if(html){
+        e.preventDefault();
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(html, 'text/html');
+        // Map inline styles → tags (so bold/italic survive) then sanitize
+        const styled = doc.body.querySelectorAll('[style]');
+        styled.forEach(node => {
+          const style = (node.getAttribute('style')||'').toLowerCase();
+          const bold = /font-weight\s*:\s*(bold|[6-9]00)/.test(style);
+          const italic = /font-style\s*:\s*italic/.test(style);
+          if(bold || italic){
+            const frag = document.createDocumentFragment();
+            while(node.firstChild) frag.appendChild(node.firstChild);
+            let wrapper = frag;
+            if(italic){ const em = document.createElement('em'); em.appendChild(wrapper); wrapper = em; }
+            if(bold){ const strong = document.createElement('strong'); strong.appendChild(wrapper); wrapper = strong; }
+            node.parentNode.insertBefore(wrapper, node);
+            node.remove();
+          }
+        });
+        // Unwrap giant <strong> blocks to avoid whole-pane bold
+        doc.body.querySelectorAll('strong, b').forEach(s => {
+          const blocky = Array.from(s.childNodes).some(n => n.nodeType===1 && /^(P|DIV|UL|OL|TABLE|SECTION|ARTICLE|HEADER|MAIN|FIGURE|H[1-6])$/.test(n.tagName));
+          if(blocky){ while(s.firstChild) s.parentNode.insertBefore(s.firstChild, s); s.remove(); }
+        });
+        sanitize(doc.body);
+        pasteArea.innerHTML = doc.body.innerHTML;
+      } else if(text){
+        setTimeout(()=>{ pasteArea.textContent = normalizeText(text); }, 0);
+      }
+    });
+
+    ['dragover','dragenter'].forEach(evt=> pasteArea.addEventListener(evt, e=>{ e.preventDefault(); e.dataTransfer.dropEffect='copy'; }));
+    pasteArea.addEventListener('drop', (e)=>{
+      e.preventDefault();
+      const file = e.dataTransfer.files && e.dataTransfer.files[0]; if(!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const content = reader.result + '';
+        if(/<\w+/.test(content)){
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(content, 'text/html');
+          sanitize(doc.body);
+          pasteArea.innerHTML = doc.body.innerHTML;
+        } else { pasteArea.textContent = normalizeText(content); }
+      };
+      reader.readAsText(file);
+    });
+
+    // --- Buttons & shortcuts ----------------------------------------------
+    function focusPaste(){ pasteArea.focus(); }
+    function exec(cmd, val=null){ document.execCommand(cmd,false,val); focusPaste(); }
+
+    // Formatting controls
+    el('#boldBtn').addEventListener('click', ()=> exec('bold'));
+    el('#italicBtn').addEventListener('click', ()=> exec('italic'));
+    el('#h1Btn').addEventListener('click', ()=> exec('formatBlock','H1'));
+    el('#h2Btn').addEventListener('click', ()=> exec('formatBlock','H2'));
+    el('#h3Btn').addEventListener('click', ()=> exec('formatBlock','H3'));
+    el('#ulBtn').addEventListener('click', ()=> exec('insertUnorderedList'));
+    el('#olBtn').addEventListener('click', ()=> exec('insertOrderedList'));
+    el('#quoteBtn').addEventListener('click', ()=> exec('formatBlock','BLOCKQUOTE'));
+    el('#clearFormatBtn').addEventListener('click', ()=> exec('removeFormat'));
+
+    // Find/Replace modal
+    const findModal = el('#findModal');
+    const findInput = () => el('#findText');
+    const replaceInput = () => el('#replaceText');
+    el('#findBtn').addEventListener('click', ()=>{ findModal.classList.add('show'); setTimeout(()=>findInput().focus(), 0); });
+    el('#findCloseBtn').addEventListener('click', ()=>{ findModal.classList.remove('show'); });
+    el('#replaceAllBtn').addEventListener('click', ()=>{
+      const find = findInput().value; const repl = replaceInput().value; if(!find) return;
+      const walker = document.createTreeWalker(pasteArea, NodeFilter.SHOW_TEXT, null); const nodes=[]; while(walker.nextNode()) nodes.push(walker.currentNode);
+      nodes.forEach(n=>{ n.nodeValue = (n.nodeValue||'').split(find).join(repl); });
+      findModal.classList.remove('show'); focusPaste();
+    });
+
+    // Cleanup tools
+    function walkTextNodes(root, cb){
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      const nodes = []; while(walker.nextNode()) nodes.push(walker.currentNode); nodes.forEach(cb);
+    }
+    el('#normalizeBtn').addEventListener('click', ()=>{ walkTextNodes(pasteArea, n=>{ n.nodeValue = normalizeText(n.nodeValue||''); }); focusPaste(); });
+    el('#collapseBtn').addEventListener('click', ()=>{
+      walkTextNodes(pasteArea, n=>{ n.nodeValue = (n.nodeValue||'').replace(/[\t ]+/g,' ').replace(/\s*\n\s*/g,'\n'); });
+      pasteArea.querySelectorAll('p,span,div').forEach(elm=>{ if(!(elm.textContent||'').trim()) elm.remove(); });
+      focusPaste();
+    });
+    el('#unwrapBtn').addEventListener('click', ()=>{
+      pasteArea.querySelectorAll('br').forEach(br=>{ br.replaceWith(' '); });
+      walkTextNodes(pasteArea, n=>{ n.nodeValue = (n.nodeValue||'').replace(/\s*\n\s*/g,' '); });
+      focusPaste();
+    });
+
+    // Main buttons
+    el('#convertBtn').addEventListener('click', convertNow);
+    el('#pasteBtn').addEventListener('click', async ()=>{ try{ const txt = await navigator.clipboard.readText(); if(txt){ pasteArea.textContent = normalizeText(txt); } } catch(err){ pasteArea.focus(); } });
+    el('#clearBtn').addEventListener('click', ()=>{ pasteArea.innerHTML=''; mdOut.value=''; pasteArea.focus(); });
+    el('#fixBulletsBtn').addEventListener('click', ()=>{ makeBulletsReal(); pasteArea.focus(); });
+
+    el('#copyBtn').addEventListener('click', async ()=>{ try{ await navigator.clipboard.writeText(mdOut.value); }catch(e){} });
+    el('#downloadBtn').addEventListener('click', ()=>{ const blob = new Blob([mdOut.value||''], {type:'text/markdown'}); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'converted.md'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000); });
+
+    document.addEventListener('keydown', (e)=>{ if((e.ctrlKey||e.metaKey) && e.key==='Enter') { e.preventDefault(); convertNow(); } });
+
+    // Demo content
+    pasteArea.innerHTML = `
+      <h2>Sample Document</h2>
+      <p>This is <strong>bold</strong>, <em>italic</em>, a <a href="https://example.com">link</a>, and an image:</p>
+      <p><img src="https://placehold.co/100x60" alt="placeholder"></p>
+      <p>Fake bullets below:</p>
+      <p>· First thing<br>· Second thing<br>· Third thing</p>
+      <hr>
+      <p>End.</p>
+    `;
+  </script>
+</body>
+</html>
